@@ -57,34 +57,35 @@ namespace dso
 {
 
 
-
+//@ 对于关键帧的边缘化策略 1. 活跃点只剩下5%的; 2. 和最新关键帧曝光变化大于0.7; 3. 距离最远的关键帧
 void FullSystem::flagFramesForMarginalization(FrameHessian* newFH)
 {
     dmvio::TimeMeasurement timeMeasurement("flagFramesForMarginalization");
+	//? 怎么会有这种情况呢? 
 	if(setting_minFrameAge > setting_maxFrames)
 	{
 		for(int i=setting_maxFrames;i<(int)frameHessians.size();i++)
 		{
-			FrameHessian* fh = frameHessians[i-setting_maxFrames];
+			FrameHessian* fh = frameHessians[i-setting_maxFrames];		// setting_maxFrames个之前的都边缘化掉
 			fh->flaggedForMarginalization = true;
 		}
 		return;
 	}
 
 
-	int flagged = 0;
+	int flagged = 0;		// 标记为边缘化的个数
 	// marginalize all frames that have not enough points.
 	for(int i=0;i<(int)frameHessians.size();i++)
 	{
 		FrameHessian* fh = frameHessians[i];
-		int in = fh->pointHessians.size() + fh->immaturePoints.size();
-		int out = fh->pointHessiansMarginalized.size() + fh->pointHessiansOut.size();
+		int in = fh->pointHessians.size() + fh->immaturePoints.size();		// 还在的点
+		int out = fh->pointHessiansMarginalized.size() + fh->pointHessiansOut.size();		// 边缘化和丢掉的点
 
 
 		Vec2 refToFh=AffLight::fromToVecExposure(frameHessians.back()->ab_exposure, fh->ab_exposure,
 				frameHessians.back()->aff_g2l(), fh->aff_g2l());
 
-
+		//* 这一帧里的内点少, 曝光时间差的大, 并且边缘化掉后还有5-7帧, 则边缘化
 		if( (in < setting_minPointsRemaining *(in+out) || fabs(logf((float)refToFh[0])) > setting_maxLogAffFacInWindow)
 				&& ((int)frameHessians.size())-flagged > setting_minFrames)
 		{
@@ -118,6 +119,7 @@ void FullSystem::flagFramesForMarginalization(FrameHessian* newFH)
 
 		for(FrameHessian* fh : frameHessians)
 		{
+			//* 至少是setting_minFrameAge个之前的帧 (保留了当前帧)
 			if(fh->frameID > latest->frameID-setting_minFrameAge || fh->frameID == 0) continue;
 			//if(fh==frameHessians.front() == 0) continue;
 
@@ -125,9 +127,11 @@ void FullSystem::flagFramesForMarginalization(FrameHessian* newFH)
 			for(FrameFramePrecalc &ffh : fh->targetPrecalc)
 			{
 				if(ffh.target->frameID > latest->frameID-setting_minFrameAge+1 || ffh.target == ffh.host) continue;
-				distScore += 1/(1e-5+ffh.distanceLL);
+				distScore += 1/(1e-5+ffh.distanceLL);	// 帧间距离
 
 			}
+			//* 有负号, 与最新帧距离占所有目标帧最大的被边缘化掉, 离得最远的, 
+			// 论文有提到, 启发式的良好的3D空间分布, 关键帧更接近
 			distScore *= -sqrtf(fh->targetPrecalc.back().distanceLL);
 
 
@@ -152,7 +156,7 @@ void FullSystem::flagFramesForMarginalization(FrameHessian* newFH)
 
 
 
-
+//@ 边缘化一个关键帧, 删除该帧上的残差
 void FullSystem::marginalizeFrame(FrameHessian* frame)
 {
     dmvio::TimeMeasurement timeMeasurement("marginalizeFrame");
@@ -166,7 +170,7 @@ void FullSystem::marginalizeFrame(FrameHessian* frame)
 	dmvio::TimeMeasurement timeMeasurementEnd("marginalizeFrameOverhead");
 
 	// drop all observations of existing points in that frame.
-
+	//* 删除其它帧在被边缘化帧上的残差
 	for(FrameHessian* fh : frameHessians)
 	{
 		if(fh==frame) continue;

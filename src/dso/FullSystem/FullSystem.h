@@ -41,11 +41,11 @@
 #include "util/IndexThreadReduce.h"
 #include "OptimizationBackend/EnergyFunctional.h"
 #include "FullSystem/PixelSelector2.h"
-#include "IMU/IMUIntegration.hpp"
-#include "util/GTData.hpp"
+#include "IMU/IMUIntegration.hpp"	///dm-vio-add
+#include "util/GTData.hpp"			///dm-vio-add
 
 #include <math.h>
-#include "IMUInitialization/GravityInitializer.h"
+#include "IMUInitialization/GravityInitializer.h"	///dm-vio-add
 
 namespace dso
 {
@@ -66,12 +66,14 @@ class CoarseDistanceMap;
 
 class EnergyFunctional;
 
+///* 删除第i个元素
 template<typename T> inline void deleteOut(std::vector<T*> &v, const int i)
 {
-	delete v[i];
-	v[i] = v.back();
-	v.pop_back();
+	delete v[i];		///删除第i个元素指向的内存
+	v[i] = v.back();	///把最后一个拿来填i
+	v.pop_back();		///弹出最后一个
 }
+///* 删除元素i
 template<typename T> inline void deleteOutPt(std::vector<T*> &v, const T* i)
 {
 	delete i;
@@ -83,6 +85,7 @@ template<typename T> inline void deleteOutPt(std::vector<T*> &v, const T* i)
 			v.pop_back();
 		}
 }
+///* 删除第i个元素, 后面按顺序补上. 针对有顺序序列
 template<typename T> inline void deleteOutOrder(std::vector<T*> &v, const int i)
 {
 	delete v[i];
@@ -90,6 +93,7 @@ template<typename T> inline void deleteOutOrder(std::vector<T*> &v, const int i)
 		v[k-1] = v[k];
 	v.pop_back();
 }
+///* 针对有序序列, 删除其中element的元素
 template<typename T> inline void deleteOutOrder(std::vector<T*> &v, const T* element)
 {
 	int i=-1;
@@ -110,7 +114,7 @@ template<typename T> inline void deleteOutOrder(std::vector<T*> &v, const T* ele
 	delete element;
 }
 
-
+///* 检查矩阵中是否有无穷元素,输出msg和该矩阵
 inline bool eigenTestNan(const MatXX &m, std::string msg)
 {
 	bool foundNan = false;
@@ -138,11 +142,11 @@ class FullSystem {
 public:
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 	FullSystem(bool linearizeOperationPassed, const dmvio::IMUCalibration& imuCalibration,
-               dmvio::IMUSettings& imuSettings);
+               dmvio::IMUSettings& imuSettings);	///原本DSO中这个构造函数是没有参数的，这里增加了三个参数
 	virtual ~FullSystem();
 
 	// adds a new frame, and creates point & residual structs.
-    void addActiveFrame(ImageAndExposure* image, int id, dmvio::IMUData* imuData, dmvio::GTData* gtData);
+    void addActiveFrame(ImageAndExposure* image, int id, dmvio::IMUData* imuData, dmvio::GTData* gtData);	///相比于DSO，增加了后面两个参数
 
 	// marginalizes a frame. drops / marginalizes points & residuals.
 	void marginalizeFrame(FrameHessian* frame);
@@ -161,7 +165,7 @@ public:
 
 	bool isLost;
 	bool initFailed;
-	bool initialized;
+	bool initialized;				///!< 是否完成初始化
 	bool linearizeOperation;
 
 
@@ -170,19 +174,20 @@ public:
 
 private:
 
-    dmvio::IMUIntegration imuIntegration;
-    dmvio::BAGTSAMIntegration* baIntegration = nullptr;
+    dmvio::IMUIntegration imuIntegration;					///dm-vio-add
+    dmvio::BAGTSAMIntegration* baIntegration = nullptr;		///dm-vio-add
 public:
 	dmvio::IMUIntegration &getImuIntegration();
 
 	Sophus::SE3 firstPose; // contains transform from first to world.
 
 private:
+	/// 创建就通过global赋值，可以用sharedptr
 	CalibHessian Hcalib;
 
-    dmvio::GravityInitializer gravityInit;
+    dmvio::GravityInitializer gravityInit;					///dm-vio-add
 
-    double framesBetweenKFsRest = 0.0;
+    double framesBetweenKFsRest = 0.0;						///dm-vio-add
 
 
 
@@ -269,30 +274,30 @@ private:
 
 
 	// =================== changed by tracker-thread. protected by trackMutex ============
-	boost::mutex trackMutex;
-	std::vector<FrameShell*> allFrameHistory;
+	boost::mutex trackMutex;					///!< tracking线程锁
+	std::vector<FrameShell*> allFrameHistory;	///!< 所有的历史帧
 	std::vector<Sophus::SE3> gtPoses;
 	CoarseInitializer* coarseInitializer;
-	Vec5 lastCoarseRMSE;
+	Vec5 lastCoarseRMSE;						///!< 上一次跟踪的平均chi2
 
 
 	// ================== changed by mapper-thread. protected by mapMutex ===============
-	boost::mutex mapMutex;
+	boost::mutex mapMutex;							///!< Mapping 线程锁
 	std::vector<FrameShell*> allKeyFramesHistory;
 
-	EnergyFunctional* ef;
-	IndexThreadReduce<Vec10> treadReduce;
+	EnergyFunctional* ef;							///!< 能量方程
+	IndexThreadReduce<Vec10> treadReduce;			///!< 多线程
 
 	float* selectionMap;
 	PixelSelector* pixelSelector;
 	CoarseDistanceMap* coarseDistanceMap;
 
-	std::vector<FrameHessian*> frameHessians;	// ONLY changed in marginalizeFrame and addFrame.
-	std::vector<PointFrameResidual*> activeResiduals;
-	float currentMinActDist;
+	std::vector<FrameHessian*> frameHessians;	///!< 关键帧 // ONLY changed in marginalizeFrame and addFrame.
+	std::vector<PointFrameResidual*> activeResiduals;	///!< 新加入的激活点的残差
+	float currentMinActDist;		///!<　激活点的阈值
 
 
-	std::vector<float> allResVec;
+	std::vector<float> allResVec;		///!< 所有在当前最近帧上的残差值
 
 
 

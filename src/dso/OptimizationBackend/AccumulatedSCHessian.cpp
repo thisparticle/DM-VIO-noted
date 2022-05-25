@@ -43,17 +43,23 @@ void AccumulatedSCHessianSSE::addPoint(EFPoint* p, bool shiftPriorToZero, int ti
 		p->data->maxRelBaseline=0;
 		return;
 	}
-
+	//* hessian + 边缘化得到hessian + 先验hessian
+	//TODO 边缘化的先验和正常的先验的不同
 	float H = p->Hdd_accAF+p->Hdd_accLF+p->priorF;
 	if(H < 1e-10) H = 1e-10;
 
 	p->data->idepth_hessian=H;
 
 	p->HdiF = 1.0 / H;
+	//* 逆深度残差
 	p->bdSumF = p->bd_accAF + p->bd_accLF;
 	if(shiftPriorToZero) p->bdSumF += p->priorF*p->deltaF;
+	//* 逆深度和内参的交叉项
 	VecCf Hcd = p->Hcd_accAF + p->Hcd_accLF;
+	//* schur complement
+	//! Hcd * Hdd_inv * Hcd^T
 	accHcc[tid].update(Hcd,Hcd,p->HdiF);
+	//! Hcd * Hdd_inv * bd
 	accbc[tid].update(Hcd, p->bdSumF * p->HdiF);
 
 	assert(std::isfinite((float)(p->HdiF)));
@@ -67,14 +73,17 @@ void AccumulatedSCHessianSSE::addPoint(EFPoint* p, bool shiftPriorToZero, int ti
 		for(EFResidual* r2 : p->residualsAll)
 		{
 			if(!r2->isActive()) continue;
-
+			//! Hfd_1 * Hdd_inv * Hfd_2^T,  f = [xi, a b]位姿 光度
 			accD[tid][r1ht+r2->targetIDX*nFrames2].update(r1->JpJdF, r2->JpJdF, p->HdiF);
 		}
-
+		//!< Hfd * Hdd_inv * Hcd^T
 		accE[tid][r1ht].update(r1->JpJdF, Hcd, p->HdiF);
+		//! Hfd * Hdd_inv * bd
 		accEB[tid][r1ht].update(r1->JpJdF,p->HdiF*p->bdSumF);
 	}
 }
+
+//@ 从累加器里面得到 hessian矩阵Schur complement
 void AccumulatedSCHessianSSE::stitchDoubleInternal(
 		MatXX* H, VecX* b, EnergyFunctional const * const EF,
 		int min, int max, Vec10* stats, int tid)
@@ -86,7 +95,8 @@ void AccumulatedSCHessianSSE::stitchDoubleInternal(
 
 	int nf = nframes[0];
 	int nframes2 = nf*nf;
-
+	
+	//* 所有线程求和
 	for(int k=min;k<max;k++)
 	{
 		int i = k%nf;
@@ -106,8 +116,9 @@ void AccumulatedSCHessianSSE::stitchDoubleInternal(
 			Hpc += accE[tid2][ijIdx].A1m.cast<double>();
 			bp += accEB[tid2][ijIdx].A1m.cast<double>();
 		}
-
+		//! Hfc部分Schur
 		H[tid].block<8,CPARS>(iIdx,0) += EF->adHost[ijIdx] * Hpc;
+		//! 位姿,光度部分的残差Schur
 		H[tid].block<8,CPARS>(jIdx,0) += EF->adTarget[ijIdx] * Hpc;
 		b[tid].segment<8>(iIdx) += EF->adHost[ijIdx] * bp;
 		b[tid].segment<8>(jIdx) += EF->adTarget[ijIdx] * bp;
@@ -142,7 +153,9 @@ void AccumulatedSCHessianSSE::stitchDoubleInternal(
 		{
 			accHcc[tid2].finish();
 			accbc[tid2].finish();
+			//! Hcc 部分Schur
 			H[tid].topLeftCorner<CPARS,CPARS>() += accHcc[tid2].A1m.cast<double>();
+			//! 内参部分的残差Schur
 			b[tid].head<CPARS>() += accbc[tid2].A1m.cast<double>();
 		}
 	}
@@ -156,6 +169,7 @@ void AccumulatedSCHessianSSE::stitchDoubleInternal(
 //	}
 }
 
+//@ 对单独某一线程进行计算Schur H b 
 void AccumulatedSCHessianSSE::stitchDouble(MatXX &H, VecX &b, EnergyFunctional const * const EF, int tid)
 {
 
