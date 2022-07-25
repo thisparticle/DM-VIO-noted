@@ -920,6 +920,12 @@ void FullSystem::flagPointsForRemoval()
  * 
  * @ note: start from here
  *******************************/
+//DSO的入口就是这个函数FullSystem::addActiveFrame，输入的图像生成的FrameHessian和FrameShell的对象
+//FrameSheel是FrameHessian的成员变量，FrameHessian保存图像信息，FrameShell保存帧的位置姿态信息
+//代码中的fh指针变量指向当前帧的FrameHessiam。在处理完成当前帧之后，会删除FramHessian，而保存在变量allFrmaeHistory中，作为整条轨迹的输出
+//对于输入图像会做预处理，如果有光度标定，像素值不是灰度值。而是处理后的辐射值，这些辐射值的大小是[0,255]，float型
+//数据预处理部分是在 FullSystem::addActiveFrame 中调用的 FrameHessian::makeImages，这个函数为当前帧的图像建立图像金字塔，并且计算每一层图像的梯度。
+//这些计算结果都存储在 FrameHessian 的成员变量中，1. dIp 每一层图像的辐射值、x 方向梯度、y 方向梯度；2. dI 指向 dIp[0] 也就是原始图像的信息；3. absSquaredGrad 存储 xy 方向梯度值的平方和。
 // The function is passed the IMU-data from the previous frame until the current frame.
 void FullSystem::addActiveFrame(ImageAndExposure* image, int id, dmvio::IMUData* imuData, dmvio::GTData* gtData)
 {
@@ -955,6 +961,7 @@ void FullSystem::addActiveFrame(ImageAndExposure* image, int id, dmvio::IMUData*
     measureInit.end();
 
 	//[ ***step 4*** ] 进行初始化
+	//1.第一帧：进入 FullSystem::addActiveFrame，首先判断是否完成了初始化，如果没有完成初始化，就将当前帧 fh 输入 CoarseInitializer::setFirst 中。完成之后接着处理下一帧。
 	if(!initialized)
 	{
 		// use initializer!
@@ -971,6 +978,9 @@ void FullSystem::addActiveFrame(ImageAndExposure* image, int id, dmvio::IMUData*
         }else
         {
             dmvio::TimeMeasurement initMeasure("InitializerOtherFrames");
+			//初始化最少需要有七帧，如果第二帧CoarseInitializer::trackFrame 处理完成之后，位移足够,则再优化到满足位移的后5帧返回true. 
+			//在 FullSystem::initializerFromInitializer 中为第一帧生成 pointHessians，一共2000个左右。
+			//随后将第7帧作为 KeyFrame 输入到 FullSystem::deliverTrackedFrame，最终流入 FullSystem::makeKeyFrame。（FullSystem::deliverTrackedFrame 的作用就是实现多线程的数据输入。）
 			bool initDone = coarseInitializer->trackFrame(fh, outputWrapper);
 			if(setting_useIMU)
 			{
@@ -1597,6 +1607,9 @@ void FullSystem::makeKeyFrame( FrameHessian* fh)
 }
 
 //@ 从初始化中提取出信息, 用于跟踪.
+//FullSystem::initializeFromInitializer，第一帧是 firstFrame，第七帧是 newFrame，从 CoarseInitializer 中抽取出 2000 个点作为 firstFrame 的 pointHessians。
+//设置的逆深度有 CoarseIntiailzier::trackFrame 中计算出来的 iR 和 idepth，而这里使用了 rescaleFactor 这个局部变量，
+//保证所有 iR 的均值为 1。iR 设置的是 PointHessian 的 idepth，而 idepth 设置的是 PointHessian 的 idepth_zero(缩放了scale倍的固定线性化点逆深度)，idepth_zero 相当于估计的真值，用于计算误差。
 void FullSystem::initializeFromInitializer(FrameHessian* newFrame)
 {
 	boost::unique_lock<boost::mutex> lock(mapMutex);

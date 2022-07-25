@@ -82,6 +82,18 @@ CoarseInitializer::~CoarseInitializer()
 }
 
 
+//[ ***1*** ] CoarseInitializer::trackFrame 中将所有 points （第一帧上的点）的逆深度初始化为1。
+//从金字塔最高层到最底层依次匹配，每一层的匹配都是高斯牛顿优化过程，在 CoarseIntializer::calcResAndGS 中计算Hessian矩阵等信息，
+//计算出来的结果在 CoarseInitializer::trackFrame 中更新相对位姿（存储在局部变量中，现在还没有确定要不要接受这一步优化），
+//在 CoarseInitializer::trackFrame 中调用 CoarseInitializer::doStep 中更新点的逆深度信息。
+//随后再调用一次 CoarseIntializer::calcResAndGS，计算新的能量，如果新能量更低，那么就接受这一步优化，在 CoarseInitializer::applyStep 中生效前面保存的优化结果。
+//[ ***2*** ] 一些加速优化过程的操作：1. 每一层匹配开始的时候，调用一次 CoarseInitializer::propagateDown，将当前层所有点的逆深度设置为的它们 parent （上一层）的逆深度；
+//2. 在每次接受优化结果，更新每个点的逆深度，调用一次 CoarseInitializer::optReg 将所有点的 iR 设置为其 neighbour 逆深度的中位数，
+//其实这个函数在 CoarseInitializer::propagateDown 和 CoarseInitializer::propagateUp 中都有调用，
+//iR 变量相当于是逆深度的真值，在优化的过程中，使用这个值计算逆深度误差，效果是幅面中的逆深度平滑。
+//[ ***3*** ] 优化过程中的 lambda 和点的逆深度有关系，起一个加权的作用，也不是很明白对 lambda 增减的操作。
+//在完成所有层的优化之后，进行 CoarseInitializer::propagateUp 操作，使用低一层点的逆深度更新其高一层点 parent 的逆深度，
+//这个更新是基于 iR 的，使得逆深度平滑。高层的点逆深度，在后续的操作中，没有使用到，所以这一步操作我认为是无用的。
 bool CoarseInitializer::trackFrame(FrameHessian *newFrameHessian, std::vector<IOWrap::Output3DWrapper*> &wraps)
 {
 	newFrame = newFrameHessian;
@@ -827,6 +839,12 @@ void CoarseInitializer::makeGradients(Eigen::Vector3f** data)
 		}
 	}
 }
+
+//CoarseInitializer::setFirst，计算图像的每一层内参, 再针对不同层数选择大梯度像素, 第0层比较复杂1d, 2d, 4d大小block来选择3个层次的像素选取点，
+//其它层则选出goodpoints, 作为后续第二帧匹配生成 pointHessians 和 immaturePoints 的候选点，这些点存储在 CoarseInitializer::points 中。
+//每一层点之间都有联系，在 CoarseInitializer::makeNN 中计算每个点最邻近的10个点 neighbours，在上一层的最邻近点 parent。
+//pointHessians 是成熟点，具有逆深度信息的点，能够在其他影像追踪到的点。
+//immaturePoints 是未成熟点，需要使用非关键帧的影像对它的逆深度进行优化，在使用关键帧将它转换成 pointHessians，并且加入到窗口优化。
 void CoarseInitializer::setFirst(	CalibHessian* HCalib, FrameHessian* newFrameHessian)
 {
 	//[ ***step 1*** ] 计算图像每层的内参

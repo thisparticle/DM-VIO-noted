@@ -131,15 +131,17 @@ void FrameHessian::release()
 }
 
 //* 计算各层金字塔图像的像素值和梯度
+//数据预处理部分是在 FullSystem::addActiveFrame 中调用的 FrameHessian::makeImages，这个函数为当前帧的图像建立图像金字塔，并且计算每一层图像的梯度。
+//这些计算结果都存储在 FrameHessian 的成员变量中，1. dIp 每一层图像的辐射值、x 方向梯度、y 方向梯度；2. dI 指向 dIp[0] 也就是原始图像的信息；3. absSquaredGrad 存储 xy 方向梯度值的平方和。
 void FrameHessian::makeImages(float* color, CalibHessian* HCalib)
 {
 	// 每一层创建图像值, 和图像梯度的存储空间
 	for(int i=0;i<pyrLevelsUsed;i++)
 	{
 		dIp[i] = new Eigen::Vector3f[wG[i]*hG[i]];
-		absSquaredGrad[i] = new float[wG[i]*hG[i]];
+		absSquaredGrad[i] = new float[wG[i]*hG[i]];	//absSquaredGrad 存储 xy 方向梯度值的平方和。
 	}
-	dI = dIp[0];	// 原来他们指向同一个地方
+	dI = dIp[0];	// 原来他们指向同一个地方 //dI 指向 dIp[0] 也就是原始图像的信息
 
 
 	// make d0
